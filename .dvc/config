@@ -1,0 +1,10 @@
+[core]
+    remote = myremote
+['remote "myremote"']
+    url = gdrive://1ZWVQklxwLhCKXBLRMI0opBZrJ8B9r0-r
+    gdrive_use_service_account = true
+    gdrive_service_account_user_email = chkarteek05@gmail.com
+    gdrive_service_account_json_file_path = C:/Users/chkar/Documents/Python/my_mlops_project/dvc-mlops-storage-34a22648f04d.json
+    gdrive_client_id = 929462117974-like5irgkp9hjjsgcbkn7odfj2u9qure.apps.googleusercontent.com
+    gdrive_client_secret = '''GOCSPX-
+3Q4UUhU_IVxotBICedzKq7ow3TQZ'''
