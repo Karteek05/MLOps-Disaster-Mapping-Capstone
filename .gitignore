@@ -1,0 +1,19 @@
+# .gitignore
+# DVC & Git Metadata
+.dvc/
+.dvcignore
+.git/
+
+# Python Environment
+__pycache__/
+*.pyc
+
+# Data and Models (Keep local size low)
+data/raw/*
+data/processed/*
+data/interim/*
+models/*
+
+# OS/IDE junk
+.vscode/
+.idea/

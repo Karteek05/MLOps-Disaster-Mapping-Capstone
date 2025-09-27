@@ -1,0 +1,10 @@
+# requirements.txt
+opencv-python 
+Pillow
+numpy
+# These are needed for MLOps tracking
+dvc[gdrive]
+mlflow 
+# Choose one Deep Learning Framework
+tensorflow 
+# or pytorch (You should choose one, not both
