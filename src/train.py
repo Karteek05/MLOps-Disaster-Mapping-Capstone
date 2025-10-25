@@ -34,8 +34,8 @@ def train_model():
         mlflow.log_metric("IoU_Baseline", 0.65) # Mock metric
         
         # --- SAVE ARTIFACTS ---
-        model.save(os.path.join("models", "unet_final_test.h5"))
-        mlflow.log_artifact(os.path.join("models", "unet_final_test.h5"), "model_files")
+        MODEL_OUTPUT_PATH = "models/unet_model.h5"
+        mlflow.log_artifact(MODEL_OUTPUT_PATH)
         
         # --- SAVE FINAL METRICS (for dvc.yaml to track) ---
         with open("metrics.json", "w") as f:
