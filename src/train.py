@@ -5,8 +5,7 @@ import os
 import json
 import yaml
 import sys
-from src.model import get_unet_model # Import the model from your model.py
-
+from src.model import get_resnet_unet_model as get_unet_model # Import the model from your model.py
 # --- Configuration & Paths ---
 # DVC tracks these, so we define them here
 MODELS_DIR = "models"
