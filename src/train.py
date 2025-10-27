@@ -71,6 +71,7 @@ def train_model():
         
         # 4. FIT MODEL
         print(f"Fitting model for {params['epochs']} epochs...")
+        Y_train = np.squeeze(Y_train, axis=-1)
         # NOTE: Model fitting will be very fast due to dummy data
         model.fit(X_train, Y_train, epochs=params['epochs'], batch_size=params['batch_size'], verbose=0)
         
