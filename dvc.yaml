@@ -2,23 +2,18 @@ stages:
   prepare:
     cmd: python src/data_prep.py
     deps:
-    - data/raw
-    - src/data_prep.py
+      - data/raw
+      - src/data_prep.py
     outs:
-    - data/processed
-  
+      - data/processed
+
   train:
     cmd: python -m src.train
     deps:
-    - data/processed
-    - src/model.py
-    - src/train.py
-    # These parameters are what MLflow will track
-    params:
-    - train.epochs
-    - train.learning_rate
-    metrics:
-    - metrics.json:
-        cache: false
+      - data/processed
+      - src/train.py
+      - src/model.py
     outs:
-    - models/unet_model.h5
+      - models/unet_model.h5
+    metrics:
+      - metrics.json
