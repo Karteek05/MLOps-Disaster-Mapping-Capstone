@@ -39,13 +39,9 @@ def decoder_block(input_tensor, skip_connection, filters, name):
 def get_resnet_unet_model():
     """Builds the U-Net model using a pre-trained ResNet50 as the Encoder."""
     
-    # Define Input (1024x1024x6 stacked array)
     inputs = Input(shape=(IMG_SIZE, IMG_SIZE, NUM_CHANNELS), name="stacked_input")
     
-    # --- ENCODER (ResNet50 Backbone) ---
-    
     # 1. Load ResNet50 Architecture with NO weights initially
-    # We must set weights=None because our input is 6 channels, not 3.
     base_model = ResNet50(weights=None, include_top=False, input_tensor=inputs)
     
     # 2. Manually load the weights, skipping the incompatible input layer
@@ -54,32 +50,43 @@ def get_resnet_unet_model():
                             WEIGHTS_URL,
                             cache_subdir='models')
 
-    # This line loads weights for all compatible layers (the entire network minus the first layer)
-    # This solves the 'Shape mismatch' error and completes the transfer learning setup.
     base_model.load_weights(WEIGHTS_PATH, by_name=True, skip_mismatch=True) 
 
-    # --- Extract Skip Connections (Feature Maps) ---
+    # --- Extract Skip Connections (ResNet output sizes: 32, 64, 128, 256) ---
     skip_connections = [
-        base_model.get_layer('conv4_block6_out').output,  # Skip 1 (Deep)
-        base_model.get_layer('conv3_block4_out').output,  # Skip 2
-        base_model.get_layer('conv2_block3_out').output,  # Skip 3
-        base_model.get_layer('conv1_relu').output        # Skip 4 (Shallow)
+        base_model.get_layer('conv4_block6_out').output,  # Skip 1 (32x32)
+        base_model.get_layer('conv3_block4_out').output,  # Skip 2 (64x64)
+        base_model.get_layer('conv2_block3_out').output,  # Skip 3 (128x128)
+        base_model.get_layer('conv1_relu').output        # Skip 4 (256x256) 
     ]
     
     bottleneck = base_model.get_layer('conv5_block3_out').output # 16x16x2048
 
-    # --- DECODER (Expansive Path) ---
+    # --- DECODER (Expansive Path: Rebuilding the image) ---
     
+    # d1: 16x16 -> 32x32 (Merges with skip 1)
     d1 = decoder_block(bottleneck, skip_connections[0], 1024, name="decoder_1") 
+    
+    # d2: 32x32 -> 64x64 (Merges with skip 2)
     d2 = decoder_block(d1, skip_connections[1], 512, name="decoder_2")          
+    
+    # d3: 64x64 -> 128x128 (Merges with skip 3)
     d3 = decoder_block(d2, skip_connections[2], 256, name="decoder_3")          
+    
+    # d4: 128x128 -> 256x256 (Merges with skip 4)
     d4 = decoder_block(d3, skip_connections[3], 128, name="decoder_4")          
     
-    # Final Up-sampling to match the 1024x1024 input size
-    x = UpSampling2D(size=(2, 2))(d4)   # 256 -> 512
-    x = UpSampling2D(size=(2, 2))(x)   # 512 -> 1024
+    # --- Final Upsampling Stages (The Fix for 2048x2048) ---
     
-    # Final Output Layer: 5 channels with softmax for multi-class segmentation
+    # Final Up-sample 1: 256x256 -> 512x512
+    x = UpSampling2D(size=(2, 2), name="up_final_1")(d4) 
+    x = conv_block(x, 64, name="up_final_conv_1")
+    
+    # Final Up-sample 2: 512x512 -> 1024x1024
+    x = UpSampling2D(size=(2, 2), name="up_final_2")(x)
+    x = conv_block(x, 32, name="up_final_conv_2")
+    
+    # Final Output Layer (1024x1024x5)
     outputs = Conv2D(NUM_CLASSES, 1, activation="softmax", name="output_segmentation")(x)
 
     model = Model(inputs=[inputs], outputs=[outputs], name="ResNet_UNet_DisasterMapper")
