@@ -32,38 +32,46 @@ def decoder_block(x_in, skip, filters, name):
 def get_resnet_unet_model():
     """
     UNet with ResNet50 encoder.
-    Fixes:
-      - Ensures final logits are 1024x1024 (no 2048 blow-up).
-      - Adapts 6-channel input to 3-channel for pretrained ImageNet weights.
+    Ensures final output = 1024x1024 (no 2048 blow-up)
+    Adds 6→3 conv for pretrained weights compatibility.
     """
+
     inputs = Input(shape=(IMG_SIZE, IMG_SIZE, NUM_CHANNELS), name="stacked_input")
 
-    # Adapt 6 -> 3 channels so we can use weights="imagenet" stably.
+    # Adapt 6 -> 3 channels
     x_in = Conv2D(3, 1, padding="same", name="six_to_three")(inputs)
 
-    # ResNet50 encoder (downsampling factor = 32)
-    base = ResNet50(include_top=False, weights="imagenet", input_tensor=x_in)
+    # Backbone
+    base = ResNet50(include_top=False, weights=None, input_tensor=x_in)
 
-    # Skip connections (spatial sizes for 1024x1024 input):
-    # conv1_relu: 512x512, conv2_block3_out: 256x256, conv3_block4_out: 128x128,
-    # conv4_block6_out: 64x64, bottleneck conv5_block3_out: 32x32
+    # Load pretrained weights but skip mismatched first conv
+    base.load_weights(
+        tf.keras.utils.get_file(
+            'resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5',
+            'https://storage.googleapis.com/tensorflow/keras-applications/resnet/resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5'
+        ),
+        by_name=True,
+        skip_mismatch=True
+    )
+
+    # Skip connections
     skip1 = base.get_layer("conv4_block6_out").output   # 64x64
     skip2 = base.get_layer("conv3_block4_out").output   # 128x128
     skip3 = base.get_layer("conv2_block3_out").output   # 256x256
     skip4 = base.get_layer("conv1_relu").output         # 512x512
     bottleneck = base.get_layer("conv5_block3_out").output  # 32x32
 
-    # Decoder: 32->64->128->256->512
-    d1 = decoder_block(bottleneck, skip1, 512, name="dec1")   # 32->64
-    d2 = decoder_block(d1,        skip2, 256, name="dec2")    # 64->128
-    d3 = decoder_block(d2,        skip3, 128, name="dec3")    # 128->256
-    d4 = decoder_block(d3,        skip4, 64,  name="dec4")    # 256->512
+    # Decoder
+    d1 = decoder_block(bottleneck, skip1, 512, name="dec1")   # 32 -> 64
+    d2 = decoder_block(d1,        skip2, 256, name="dec2")    # 64 -> 128
+    d3 = decoder_block(d2,        skip3, 128, name="dec3")    # 128 -> 256
+    d4 = decoder_block(d3,        skip4, 64,  name="dec4")    # 256 -> 512
 
-    # Final upsample: 512 -> 1024 (only ONCE)
-    x = UpSampling2D(size=(2, 2), name="up_final")(d4)        # 512->1024
+    # Final upsample to 1024
+    x = UpSampling2D(size=(2, 2), name="up_final")(d4)        # 512 -> 1024
     x = conv_block(x, 64, name="final")
 
-    # Output: 1024x1024xNUM_CLASSES (use softmax since your loss is sparse_categorical_crossentropy)
+    # Output layer
     outputs = Conv2D(NUM_CLASSES, 1, activation="softmax", name="output_segmentation")(x)
 
     return Model(inputs=inputs, outputs=outputs, name="ResNetUNet_xBD")
