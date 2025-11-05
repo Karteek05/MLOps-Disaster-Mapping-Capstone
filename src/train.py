@@ -116,8 +116,4 @@ def train_model():
 
 
 if __name__ == '__main__':
-    # Ensure all required packages are available
-    if not all([tf.__version__.startswith('2'), 'dvc' in sys.modules, 'mlflow' in sys.modules]):
-        print("FATAL: TensorFlow/DVC/MLflow environment check failed.")
-    else:
-        train_model()
+    train_model()
