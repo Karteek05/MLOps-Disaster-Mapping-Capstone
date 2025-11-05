@@ -1,0 +1,14 @@
+artifact_uri: file:///C:/Users/chkar/Documents/Python/my_mlops_project/mlruns/0/5253f64291b34c83987aa7684e33ccac/artifacts
+end_time: 1762360300424
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 5253f64291b34c83987aa7684e33ccac
+run_name: Baseline_Run_LR0.001
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762360287235
+status: 4
+tags: []
+user_id: Karteek
