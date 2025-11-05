@@ -18,3 +18,28 @@ stages:
       md5: 18f49192e03bb14cece56a4e111666fc.dir
       size: 17620546117
       nfiles: 5597
+  train:
+    cmd: python -m src.train
+    deps:
+    - path: data/processed
+      hash: md5
+      md5: 18f49192e03bb14cece56a4e111666fc.dir
+      size: 17620546117
+      nfiles: 5597
+    - path: src/model.py
+      hash: md5
+      md5: add742f9853f810ebd180e8460e912a0
+      size: 3023
+    - path: src/train.py
+      hash: md5
+      md5: cdfc1536f0abce085d9eeea6027edd9a
+      size: 4400
+    outs:
+    - path: metrics.json
+      hash: md5
+      md5: dbb58b41dcc821324fce4fc26a18671d
+      size: 12
+    - path: models/unet_model.h5
+      hash: md5
+      md5: 153ed511d40aa620ec50125a5c957ab7
+      size: 493321728
