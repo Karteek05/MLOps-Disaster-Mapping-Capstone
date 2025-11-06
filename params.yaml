@@ -1,5 +1,5 @@
 train:
   batch_size: 1
-  epochs: 10          # Increased 10x for a better learning curve
+  epochs: 10        # Increased 10x for a better learning curve
   learning_rate: 0.001  # Standard default for faster initial learning
   loss_function: sparse_categorical_crossentropy
