@@ -75,23 +75,25 @@ def _collapse_mask_channels(mask):
     """
     Converts any (H, W, C) mask to (H, W) integer class labels.
     Handles one-hot or RGB masks safely.
+    Ensures consistent dtype (int32) for both tf.cond branches.
     """
     c = tf.shape(mask)[-1]
 
     def squeeze_chan():
-        return tf.squeeze(mask, axis=-1)
+        return tf.cast(tf.squeeze(mask, axis=-1), tf.int32)
 
     def argmax_chan():
-        return tf.argmax(mask, axis=-1, output_type=tf.int32)
+        return tf.cast(tf.argmax(mask, axis=-1, output_type=tf.int32), tf.int32)
 
+    # if C == 1 -> squeeze; if C == NUM_CLASSES -> argmax; else -> argmax fallback
     return tf.case(
         [
             (tf.equal(c, 1), squeeze_chan),
             (tf.equal(c, NUM_CLASSES), argmax_chan)
         ],
-        default=argmax_chan
+        default=argmax_chan,
+        exclusive=True
     )
-
 
 def load_and_parse(image_path_tensor, mask_path_tensor):
     """Loads .npy image stacks and PNG masks, enforcing correct shape/dtype."""
