@@ -5,190 +5,217 @@ import yaml
 import glob
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.metrics import MeanIoU
-from PIL import Image # Needed for loading PNG masks
+from tensorflow.keras.metrics import Metric
+from PIL import Image
 import mlflow
 import mlflow.tensorflow
 
-# Add the project root to the Python path to allow 'src' imports
+# Add project root to Python path (so src imports work)
 sys.path.append(os.getcwd())
 
-from src.model import get_resnet_unet_model # Use the corrected model name
+from src.model import get_resnet_unet_model
 
-# --- Configuration & Paths ---
+# ----------------- CONFIG -----------------
 MODELS_DIR = "models"
 METRICS_FILE = "metrics.json"
 MODEL_OUTPUT_PATH = os.path.join(MODELS_DIR, "unet_model.h5")
 DATA_DIR = "data/processed"
 
-# --- Load Parameters from params.yaml ---
+# Load parameters
 try:
-    with open("params.yaml", 'r') as f:
-        params = yaml.safe_load(f)['train']
+    with open("params.yaml", "r") as f:
+        params = yaml.safe_load(f)["train"]
 except FileNotFoundError:
-    print("FATAL: params.yaml not found. Please ensure it is in the root directory.")
+    print("FATAL: params.yaml not found.")
     sys.exit(1)
 
-# --- Define Model Constants ---
 IMG_SIZE = 1024
 NUM_CHANNELS = 6
-NUM_CLASSES = 5 
-BATCH_SIZE = params['batch_size']
-EPOCHS = params['epochs']
-LEARNING_RATE = params['learning_rate']
-LOSS_FUNCTION = params['loss_function']
+NUM_CLASSES = 5
+BATCH_SIZE = params["batch_size"]
+EPOCHS = params["epochs"]
+LEARNING_RATE = params["learning_rate"]
+LOSS_FUNCTION = params["loss_function"]
 
-# --- Helper Function for tf.data Pipeline ---
+# ----------------- CUSTOM METRIC -----------------
+class SparseMeanIoU(Metric):
+    """IoU metric compatible with sparse labels and softmax outputs."""
+
+    def __init__(self, num_classes, name="IoU", **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.num_classes = num_classes
+        self.conf_mat = self.add_weight(
+            name="conf_mat", shape=(num_classes, num_classes),
+            initializer="zeros", dtype=tf.int64
+        )
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        y_pred_labels = tf.argmax(y_pred, axis=-1, output_type=tf.int32)
+        y_true = tf.cast(y_true, tf.int32)
+        y_true = tf.reshape(y_true, [-1])
+        y_pred_labels = tf.reshape(y_pred_labels, [-1])
+        cm = tf.math.confusion_matrix(
+            y_true, y_pred_labels, num_classes=self.num_classes, dtype=tf.int64
+        )
+        self.conf_mat.assign_add(cm)
+
+    def result(self):
+        cm = tf.cast(self.conf_mat, tf.float32)
+        inter = tf.linalg.tensor_diag_part(cm)
+        union = tf.reduce_sum(cm, 0) + tf.reduce_sum(cm, 1) - inter
+        iou = inter / (union + 1e-7)
+        return tf.reduce_mean(iou)
+
+    def reset_states(self):
+        self.conf_mat.assign(tf.zeros_like(self.conf_mat))
+
+
+# ----------------- DATA LOADING HELPERS -----------------
+def _collapse_mask_channels(mask):
+    """
+    Converts any (H, W, C) mask to (H, W) integer class labels.
+    Handles one-hot or RGB masks safely.
+    """
+    c = tf.shape(mask)[-1]
+
+    def squeeze_chan():
+        return tf.squeeze(mask, axis=-1)
+
+    def argmax_chan():
+        return tf.argmax(mask, axis=-1, output_type=tf.int32)
+
+    return tf.case(
+        [
+            (tf.equal(c, 1), squeeze_chan),
+            (tf.equal(c, NUM_CLASSES), argmax_chan)
+        ],
+        default=argmax_chan
+    )
+
 
 def load_and_parse(image_path_tensor, mask_path_tensor):
-    """
-    Loads the .npy image stack and the .png mask, 
-    and applies the final shape fix for the loss function.
-    """
-    
-    # 1. Load the .npy file (the 6-channel image)
-    # We must wrap np.load in tf.numpy_function to use it in the tf.data graph
+    """Loads .npy image stacks and PNG masks, enforcing correct shape/dtype."""
+
     def _load_npy(path):
         return np.load(path.decode()).astype(np.float32)
-    
-    image = tf.numpy_function(_load_npy, [image_path_tensor], tf.float32)
-    image.set_shape([IMG_SIZE, IMG_SIZE, NUM_CHANNELS]) # Must set shape after py_function
 
-    # 2. Load the .png file (the 1-channel mask)
-    mask = tf.io.read_file(mask_path_tensor)
-    mask = tf.io.decode_png(mask, channels=1) # Shape (H, W, 1)
-    mask.set_shape([IMG_SIZE, IMG_SIZE, 1])
-    
-    # 3. CRITICAL SHAPE FIX: Squeeze mask from (H, W, 1) to (H, W)
-    # This is required for sparse_categorical_crossentropy loss function
-    mask = tf.squeeze(mask) 
+    image = tf.numpy_function(_load_npy, [image_path_tensor], tf.float32)
+    image.set_shape([IMG_SIZE, IMG_SIZE, NUM_CHANNELS])
+
+    mask_bytes = tf.io.read_file(mask_path_tensor)
+    mask = tf.io.decode_image(mask_bytes, channels=0, dtype=tf.uint8)
+
+    if mask.shape.rank is None:
+        mask.set_shape([IMG_SIZE, IMG_SIZE, None])
+
+    mask = tf.cond(
+        tf.equal(tf.rank(mask), 3),
+        lambda: _collapse_mask_channels(mask),
+        lambda: tf.cast(mask, tf.int32),
+    )
+
+    mask.set_shape([IMG_SIZE, IMG_SIZE])
     mask = tf.cast(mask, tf.int32)
-    
     return image, mask
 
-# --- Helper Function for Data Loading (ROBUST VERSION) ---
+
 def load_real_data():
-    """
-    Loads REAL data from the processed directory, ensuring that
-    only complete image/mask pairs are included to fix the mismatch error.
-    """
+    """Loads verified image/mask pairs and builds tf.data pipelines."""
     print(f"Loading REAL data paths from {DATA_DIR}...")
-    
-    # Get a list of all mask paths (the "source of truth")
-    all_mask_paths = sorted(glob.glob(os.path.join(DATA_DIR, '*_mask.png')))
-    
+
+    all_mask_paths = sorted(glob.glob(os.path.join(DATA_DIR, "*_mask.png")))
     if not all_mask_paths:
-        print(f"FATAL: No mask files (*_mask.png) found in {DATA_DIR}.")
+        print(f"FATAL: No mask files found in {DATA_DIR}.")
         sys.exit(1)
 
-    image_paths_final = []
-    mask_paths_final = []
-
-    # Loop and check for pairs
+    image_paths_final, mask_paths_final = [], []
     for mask_path in all_mask_paths:
-        # Create the corresponding image path name
-        image_path = mask_path.replace('_mask.png', '_stacked.npy')
-        
-        # Check if the matching .npy file actually exists
+        image_path = mask_path.replace("_mask.png", "_stacked.npy")
         if os.path.exists(image_path):
             image_paths_final.append(image_path)
             mask_paths_final.append(mask_path)
         else:
-            # This will skip the corrupted file (socal-fire_00000332)
-            print(f"WARNING: Skipping {os.path.basename(mask_path)} (missing corresponding .npy file).")
+            print(f"WARNING: Skipping {os.path.basename(mask_path)} (missing .npy).")
 
-    print(f"Found {len(image_paths_final)} complete image/mask pairs.")
-
-    # --- Create the tf.data.Dataset from the *synced* lists ---
     dataset = tf.data.Dataset.from_tensor_slices((image_paths_final, mask_paths_final))
-    
     DATASET_SIZE = len(image_paths_final)
     TRAIN_SIZE = int(DATASET_SIZE * 0.8)
-    
+
     if TRAIN_SIZE == 0:
-        print(f"FATAL: No training data loaded. Check data paths.")
+        print("FATAL: No valid training data found.")
         sys.exit(1)
-    
-    dataset = dataset.shuffle(DATASET_SIZE, seed=42) # Shuffle paths
+
+    dataset = dataset.shuffle(DATASET_SIZE, seed=42)
     train_dataset = dataset.take(TRAIN_SIZE)
     val_dataset = dataset.skip(TRAIN_SIZE)
-    
-    # --- Build the tf.data pipeline ---
+
     AUTOTUNE = tf.data.AUTOTUNE
-    
     train_dataset = train_dataset.map(load_and_parse, num_parallel_calls=AUTOTUNE)
-    train_dataset = train_dataset.batch(BATCH_SIZE)
-    train_dataset = train_dataset.prefetch(buffer_size=AUTOTUNE)
-    
     val_dataset = val_dataset.map(load_and_parse, num_parallel_calls=AUTOTUNE)
-    val_dataset = val_dataset.batch(BATCH_SIZE)
-    val_dataset = val_dataset.prefetch(buffer_size=AUTOTUNE)
-    
-    print("Data pipeline built successfully.")
+
+    train_dataset = train_dataset.batch(BATCH_SIZE).prefetch(AUTOTUNE)
+    val_dataset = val_dataset.batch(BATCH_SIZE).prefetch(AUTOTUNE)
+
+    print(f"✅ Data pipeline built: {TRAIN_SIZE} train samples, {DATASET_SIZE-TRAIN_SIZE} val samples")
     return train_dataset, val_dataset
 
-# --- Main Training Function ---
+
+# ----------------- TRAIN FUNCTION -----------------
 def train_model():
-    """Builds, compiles, trains, and logs the model artifacts."""
-    
     os.makedirs(MODELS_DIR, exist_ok=True)
-    
+
     with mlflow.start_run(run_name=f"Final_Run_LR{LEARNING_RATE}") as run:
-        print("-" * 50)
+        print("-" * 60)
         print("MLflow Run Started. Logging parameters...")
-        
-        # 1. LOGGING PARAMETERS
+
         mlflow.log_params(params)
-        
-        # 2. MODEL & DATA
-        # This now loads the real, verified data pipeline
-        train_dataset, val_dataset = load_real_data() 
-        
+
+        # Load data
+        train_dataset, val_dataset = load_real_data()
+
+        # Debug one batch shape
+        for Xb, Yb in train_dataset.take(1):
+            print("DEBUG: X batch shape:", Xb.shape, "dtype:", Xb.dtype)
+            print("DEBUG: Y batch shape:", Yb.shape, "dtype:", Yb.dtype)
+            break
+
+        # Build and compile model
         print("Building model...")
         model = get_resnet_unet_model()
-        
-        # 3. COMPILE MODEL (With REAL metrics)
         model.compile(
             optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
-            loss=LOSS_FUNCTION, 
-            metrics=['accuracy', MeanIoU(num_classes=NUM_CLASSES, name="IoU")]
+            loss=LOSS_FUNCTION,
+            metrics=["accuracy", SparseMeanIoU(NUM_CLASSES)],
         )
-        
-        # 4. FIT MODEL
+
+        # Train
         print(f"Fitting model on REAL data for {EPOCHS} epochs...")
         history = model.fit(
             train_dataset,
-            epochs=EPOCHS, 
-            batch_size=BATCH_SIZE, # Batch size is handled by the .batch() method
+            epochs=EPOCHS,
             validation_data=val_dataset,
-            verbose=1 # Show progress in terminal
+            verbose=1,
         )
-        
-        # 5. LOG REAL METRICS
-        final_loss = history.history['loss'][-1]
-        final_val_iou = history.history['val_IoU'][-1] # Keras names this 'val_IoU'
-        
+
+        # Log metrics
+        final_loss = float(history.history["loss"][-1])
+        final_val_iou = float(history.history["val_IoU"][-1])
+
         mlflow.log_metric("final_loss", final_loss)
         mlflow.log_metric("IoU (validation)", final_val_iou)
 
-        # 6. SAVE ARTIFACTS
+        # Save artifacts
         model.save(MODEL_OUTPUT_PATH)
         mlflow.log_artifact(MODEL_OUTPUT_PATH, "model_artifact")
-        
-        # 7. SAVE FINAL METRICS
+
         with open(METRICS_FILE, "w") as f:
-            # Convert numpy types to native float for JSON serialization
-            json_metrics = {
-                "iou": float(final_val_iou), 
-                "loss": float(final_loss)
-            }
-            json.dump(json_metrics, f)
-        
-        print("\n--- Training Run Completed ---")
+            json.dump({"iou": final_val_iou, "loss": final_loss}, f)
+
+        print("\n✅ --- Training Run Completed ---")
         print(f"Model saved to {MODEL_OUTPUT_PATH}")
         print(f"Metrics saved to {METRICS_FILE}")
-        print("-" * 50)
+        print("-" * 60)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     train_model()
