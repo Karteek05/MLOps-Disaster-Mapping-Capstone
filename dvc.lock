@@ -41,5 +41,5 @@ stages:
       size: 12
     - path: models/unet_model.h5
       hash: md5
-      md5: 153ed511d40aa620ec50125a5c957ab7
-      size: 493321728
+      md5: 1194d4040b877a775ec50734e4260431
+      size: 493123112
