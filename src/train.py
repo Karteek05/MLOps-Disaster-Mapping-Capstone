@@ -6,6 +6,7 @@ import glob
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.metrics import MeanIoU
+from PIL import Image # Needed for loading PNG masks
 import mlflow
 import mlflow.tensorflow
 
@@ -65,6 +66,67 @@ def load_and_parse(image_path_tensor, mask_path_tensor):
     
     return image, mask
 
+# --- Helper Function for Data Loading (ROBUST VERSION) ---
+def load_real_data():
+    """
+    Loads REAL data from the processed directory, ensuring that
+    only complete image/mask pairs are included to fix the mismatch error.
+    """
+    print(f"Loading REAL data paths from {DATA_DIR}...")
+    
+    # Get a list of all mask paths (the "source of truth")
+    all_mask_paths = sorted(glob.glob(os.path.join(DATA_DIR, '*_mask.png')))
+    
+    if not all_mask_paths:
+        print(f"FATAL: No mask files (*_mask.png) found in {DATA_DIR}.")
+        sys.exit(1)
+
+    image_paths_final = []
+    mask_paths_final = []
+
+    # Loop and check for pairs
+    for mask_path in all_mask_paths:
+        # Create the corresponding image path name
+        image_path = mask_path.replace('_mask.png', '_stacked.npy')
+        
+        # Check if the matching .npy file actually exists
+        if os.path.exists(image_path):
+            image_paths_final.append(image_path)
+            mask_paths_final.append(mask_path)
+        else:
+            # This will skip the corrupted file (socal-fire_00000332)
+            print(f"WARNING: Skipping {os.path.basename(mask_path)} (missing corresponding .npy file).")
+
+    print(f"Found {len(image_paths_final)} complete image/mask pairs.")
+
+    # --- Create the tf.data.Dataset from the *synced* lists ---
+    dataset = tf.data.Dataset.from_tensor_slices((image_paths_final, mask_paths_final))
+    
+    DATASET_SIZE = len(image_paths_final)
+    TRAIN_SIZE = int(DATASET_SIZE * 0.8)
+    
+    if TRAIN_SIZE == 0:
+        print(f"FATAL: No training data loaded. Check data paths.")
+        sys.exit(1)
+    
+    dataset = dataset.shuffle(DATASET_SIZE, seed=42) # Shuffle paths
+    train_dataset = dataset.take(TRAIN_SIZE)
+    val_dataset = dataset.skip(TRAIN_SIZE)
+    
+    # --- Build the tf.data pipeline ---
+    AUTOTUNE = tf.data.AUTOTUNE
+    
+    train_dataset = train_dataset.map(load_and_parse, num_parallel_calls=AUTOTUNE)
+    train_dataset = train_dataset.batch(BATCH_SIZE)
+    train_dataset = train_dataset.prefetch(buffer_size=AUTOTUNE)
+    
+    val_dataset = val_dataset.map(load_and_parse, num_parallel_calls=AUTOTUNE)
+    val_dataset = val_dataset.batch(BATCH_SIZE)
+    val_dataset = val_dataset.prefetch(buffer_size=AUTOTUNE)
+    
+    print("Data pipeline built successfully.")
+    return train_dataset, val_dataset
+
 # --- Main Training Function ---
 def train_model():
     """Builds, compiles, trains, and logs the model artifacts."""
@@ -79,36 +141,10 @@ def train_model():
         mlflow.log_params(params)
         
         # 2. MODEL & DATA
-        print("Loading REAL data paths...")
-        image_paths = sorted(glob.glob(os.path.join(DATA_DIR, '*_stacked.npy')))
-        mask_paths = sorted(glob.glob(os.path.join(DATA_DIR, '*_mask.png')))
+        # This now loads the real, verified data pipeline
+        train_dataset, val_dataset = load_real_data() 
         
-        if not image_paths:
-            print(f"FATAL: No .npy files found in {DATA_DIR}. Check 'dvc pull' or 'prepare' stage.")
-            sys.exit(1)
-            
-        dataset = tf.data.Dataset.from_tensor_slices((image_paths, mask_paths))
-        
-        # Create a train/validation split (80% train, 20% validation)
-        DATASET_SIZE = len(image_paths)
-        TRAIN_SIZE = int(DATASET_SIZE * 0.8)
-        
-        dataset = dataset.shuffle(DATASET_SIZE, seed=42) # Shuffle paths
-        train_dataset = dataset.take(TRAIN_SIZE)
-        val_dataset = dataset.skip(TRAIN_SIZE)
-        
-        # --- Build the tf.data pipeline ---
-        AUTOTUNE = tf.data.AUTOTUNE
-        
-        train_dataset = train_dataset.map(load_and_parse, num_parallel_calls=AUTOTUNE)
-        train_dataset = train_dataset.batch(BATCH_SIZE)
-        train_dataset = train_dataset.prefetch(buffer_size=AUTOTUNE)
-        
-        val_dataset = val_dataset.map(load_and_parse, num_parallel_calls=AUTOTUNE)
-        val_dataset = val_dataset.batch(BATCH_SIZE)
-        val_dataset = val_dataset.prefetch(buffer_size=AUTOTUNE)
-        
-        print("Data pipeline built. Building model...")
+        print("Building model...")
         model = get_resnet_unet_model()
         
         # 3. COMPILE MODEL (With REAL metrics)
@@ -123,7 +159,7 @@ def train_model():
         history = model.fit(
             train_dataset,
             epochs=EPOCHS, 
-            batch_size=BATCH_SIZE, 
+            batch_size=BATCH_SIZE, # Batch size is handled by the .batch() method
             validation_data=val_dataset,
             verbose=1 # Show progress in terminal
         )
@@ -141,12 +177,18 @@ def train_model():
         
         # 7. SAVE FINAL METRICS
         with open(METRICS_FILE, "w") as f:
-            json.dump({"iou": final_val_iou, "loss": final_loss}, f)
+            # Convert numpy types to native float for JSON serialization
+            json_metrics = {
+                "iou": float(final_val_iou), 
+                "loss": float(final_loss)
+            }
+            json.dump(json_metrics, f)
         
         print("\n--- Training Run Completed ---")
         print(f"Model saved to {MODEL_OUTPUT_PATH}")
         print(f"Metrics saved to {METRICS_FILE}")
         print("-" * 50)
+
 
 if __name__ == '__main__':
     train_model()
