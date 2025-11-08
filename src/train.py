@@ -10,16 +10,18 @@ from PIL import Image
 import mlflow
 import mlflow.tensorflow
 
-# Add project root to Python path (so src imports work)
+# Add project root to Python path
 sys.path.append(os.getcwd())
-
 from src.model import get_resnet_unet_model
 
 # ----------------- CONFIG -----------------
-MODELS_DIR = "models"
-METRICS_FILE = "metrics.json"
+MODELS_DIR = os.path.join(os.getcwd(), "artifacts", "models")
+METRICS_FILE = os.path.join(os.getcwd(), "metrics.json")
 MODEL_OUTPUT_PATH = os.path.join(MODELS_DIR, "unet_model.h5")
-DATA_DIR = "data/processed"
+DATA_DIR = os.path.join(os.getcwd(), "data", "processed")
+
+# Ensure directories exist
+os.makedirs(MODELS_DIR, exist_ok=True)
 
 # Load parameters
 try:
@@ -39,8 +41,6 @@ LOSS_FUNCTION = params["loss_function"]
 
 # ----------------- CUSTOM METRIC -----------------
 class SparseMeanIoU(Metric):
-    """IoU metric compatible with sparse labels and softmax outputs."""
-
     def __init__(self, num_classes, name="IoU", **kwargs):
         super().__init__(name=name, **kwargs)
         self.num_classes = num_classes
@@ -70,13 +70,8 @@ class SparseMeanIoU(Metric):
         self.conf_mat.assign(tf.zeros_like(self.conf_mat))
 
 
-# ----------------- DATA LOADING HELPERS -----------------
+# ----------------- DATA LOADING -----------------
 def _collapse_mask_channels(mask):
-    """
-    Converts any (H, W, C) mask to (H, W) integer class labels.
-    Handles one-hot or RGB masks safely.
-    Ensures consistent dtype (int32) for both tf.cond branches.
-    """
     c = tf.shape(mask)[-1]
 
     def squeeze_chan():
@@ -85,7 +80,6 @@ def _collapse_mask_channels(mask):
     def argmax_chan():
         return tf.cast(tf.argmax(mask, axis=-1, output_type=tf.int32), tf.int32)
 
-    # if C == 1 -> squeeze; if C == NUM_CLASSES -> argmax; else -> argmax fallback
     return tf.case(
         [
             (tf.equal(c, 1), squeeze_chan),
@@ -96,8 +90,6 @@ def _collapse_mask_channels(mask):
     )
 
 def load_and_parse(image_path_tensor, mask_path_tensor):
-    """Loads .npy image stacks and PNG masks, enforcing correct shape/dtype."""
-
     def _load_npy(path):
         return np.load(path.decode()).astype(np.float32)
 
@@ -117,17 +109,15 @@ def load_and_parse(image_path_tensor, mask_path_tensor):
     )
 
     mask.set_shape([IMG_SIZE, IMG_SIZE])
-    mask = tf.cast(mask, tf.int32)
     return image, mask
 
 
 def load_real_data():
-    """Loads verified image/mask pairs and builds tf.data pipelines."""
-    print(f"Loading REAL data paths from {DATA_DIR}...")
-
+    print(f"Loading data from {DATA_DIR}...")
     all_mask_paths = sorted(glob.glob(os.path.join(DATA_DIR, "*_mask.png")))
+
     if not all_mask_paths:
-        print(f"FATAL: No mask files found in {DATA_DIR}.")
+        print("FATAL: No mask files found.")
         sys.exit(1)
 
     image_paths_final, mask_paths_final = [], []
@@ -136,16 +126,10 @@ def load_real_data():
         if os.path.exists(image_path):
             image_paths_final.append(image_path)
             mask_paths_final.append(mask_path)
-        else:
-            print(f"WARNING: Skipping {os.path.basename(mask_path)} (missing .npy).")
 
     dataset = tf.data.Dataset.from_tensor_slices((image_paths_final, mask_paths_final))
     DATASET_SIZE = len(image_paths_final)
     TRAIN_SIZE = int(DATASET_SIZE * 0.8)
-
-    if TRAIN_SIZE == 0:
-        print("FATAL: No valid training data found.")
-        sys.exit(1)
 
     dataset = dataset.shuffle(DATASET_SIZE, seed=42)
     train_dataset = dataset.take(TRAIN_SIZE)
@@ -158,31 +142,20 @@ def load_real_data():
     train_dataset = train_dataset.batch(BATCH_SIZE).prefetch(AUTOTUNE)
     val_dataset = val_dataset.batch(BATCH_SIZE).prefetch(AUTOTUNE)
 
-    print(f"✅ Data pipeline built: {TRAIN_SIZE} train samples, {DATASET_SIZE-TRAIN_SIZE} val samples")
+    print(f"✅ Data ready: {TRAIN_SIZE} train, {DATASET_SIZE - TRAIN_SIZE} val")
     return train_dataset, val_dataset
 
 
 # ----------------- TRAIN FUNCTION -----------------
 def train_model():
+    print("🚀 Starting training...")
     os.makedirs(MODELS_DIR, exist_ok=True)
 
-    with mlflow.start_run(run_name=f"Final_Run_LR{LEARNING_RATE}") as run:
-        print("-" * 60)
-        print("MLflow Run Started. Logging parameters...")
-
+    with mlflow.start_run(run_name=f"Run_LR{LEARNING_RATE}") as run:
         mlflow.log_params(params)
 
-        # Load data
         train_dataset, val_dataset = load_real_data()
 
-        # Debug one batch shape
-        for Xb, Yb in train_dataset.take(1):
-            print("DEBUG: X batch shape:", Xb.shape, "dtype:", Xb.dtype)
-            print("DEBUG: Y batch shape:", Yb.shape, "dtype:", Yb.dtype)
-            break
-
-        # Build and compile model
-        print("Building model...")
         model = get_resnet_unet_model()
         model.compile(
             optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
@@ -190,8 +163,6 @@ def train_model():
             metrics=["accuracy", SparseMeanIoU(NUM_CLASSES)],
         )
 
-        # Train
-        print(f"Fitting model on REAL data for {EPOCHS} epochs...")
         history = model.fit(
             train_dataset,
             epochs=EPOCHS,
@@ -199,24 +170,23 @@ def train_model():
             verbose=1,
         )
 
-        # Log metrics
         final_loss = float(history.history["loss"][-1])
         final_val_iou = float(history.history["val_IoU"][-1])
 
         mlflow.log_metric("final_loss", final_loss)
         mlflow.log_metric("IoU (validation)", final_val_iou)
 
-        # Save artifacts
-        model.save(MODEL_OUTPUT_PATH)
-        mlflow.log_artifact(MODEL_OUTPUT_PATH, "model_artifact")
+        # Save model
+        abs_model_path = os.path.abspath(MODEL_OUTPUT_PATH)
+        model.save(abs_model_path)
+        print(f"✅ Model saved to: {abs_model_path}")
+
+        mlflow.log_artifact(abs_model_path, "model_artifact")
 
         with open(METRICS_FILE, "w") as f:
             json.dump({"iou": final_val_iou, "loss": final_loss}, f)
 
-        print("\n✅ --- Training Run Completed ---")
-        print(f"Model saved to {MODEL_OUTPUT_PATH}")
-        print(f"Metrics saved to {METRICS_FILE}")
-        print("-" * 60)
+        print(f"✅ Metrics written to {METRICS_FILE}")
 
 
 if __name__ == "__main__":
