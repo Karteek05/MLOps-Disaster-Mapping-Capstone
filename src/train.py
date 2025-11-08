@@ -204,7 +204,9 @@ def train_model():
         final_val_iou = float(history.history["val_IoU"][-1])
 
         mlflow.log_metric("final_loss", final_loss)
-        mlflow.log_metric("IoU (validation)", final_val_iou)
+        mlflow.log_metric("val_IoU", final_val_iou)
+
+       # mlflow.log_metric("IoU (validation)", final_val_iou)
 
         # Save artifacts
         model.save(MODEL_OUTPUT_PATH)
