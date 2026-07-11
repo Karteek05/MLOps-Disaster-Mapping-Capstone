@@ -1,5 +1,8 @@
 train:
   batch_size: 1
-  epochs: 1      # Increased 10x for a better learning curve
-  learning_rate: 0.001  # Standard default for faster initial learning
+  epochs: 10
+  learning_rate: 0.001
   loss_function: sparse_categorical_crossentropy
+  img_size: 256          # resize target for training; 1024 native res is too
+                          # large for a 4GB GPU. Try 128 if this still OOMs.
+  pretrained_trainable: false  # keep ResNet50 encoder frozen to fit in 4GB VRAM

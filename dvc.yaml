@@ -13,7 +13,20 @@ stages:
       - data/processed
       - src/train.py
       - src/model.py
+      - src/data_loader.py
+      - src/metrics.py
     outs:
       - models/unet_model.h5
     metrics:
       - metrics.json
+
+  evaluate:
+    cmd: python -m src.evaluate
+    deps:
+      - data/processed
+      - models/unet_model.h5
+      - src/evaluate.py
+      - src/data_loader.py
+      - src/metrics.py
+    metrics:
+      - eval_metrics.json

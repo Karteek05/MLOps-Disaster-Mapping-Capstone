@@ -1,10 +1,20 @@
 # requirements.txt
-opencv-python 
-Pillow
-numpy
-# These are needed for MLOps tracking
-dvc[gdrive]
-mlflow 
-# Choose one Deep Learning Framework
-tensorflow 
-# or pytorch (You should choose one, not both
+opencv-python-headless>=4.9,<5  # headless: avoids libGL dependency issues in CI/servers
+Pillow>=10,<12
+numpy>=1.26,<2
+
+# MLOps tracking
+dvc[gs]>=3.60,<4
+mlflow>=2.15,<3
+
+# Deep learning framework
+# NOTE: on native Windows, pip-installed tensorflow is CPU-only (GPU builds
+# dropped after 2.10). For GPU training, install inside WSL2 with:
+#   pip install "tensorflow[and-cuda]"
+tensorflow>=2.15,<2.19
+
+# App
+gradio>=4.44,<5
+
+# Testing
+pytest>=8,<9

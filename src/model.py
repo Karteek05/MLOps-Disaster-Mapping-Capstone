@@ -6,7 +6,7 @@ from tensorflow.keras.layers import (
 )
 from tensorflow.keras.models import Model
 
-# --- CONFIG ---
+# --- Defaults for real training ---
 IMG_SIZE = 1024        # H=W
 NUM_CHANNELS = 6       # 3 (pre) + 3 (post)
 NUM_CLASSES = 5        # background + 4 damage levels
@@ -29,49 +29,65 @@ def decoder_block(x_in, skip, filters, name):
     return x
 
 # ---- Model ----
-def get_resnet_unet_model():
+def get_resnet_unet_model(
+    img_size=IMG_SIZE,
+    num_channels=NUM_CHANNELS,
+    num_classes=NUM_CLASSES,
+    pretrained=True,
+    pretrained_trainable=False,
+):
     """
     UNet with ResNet50 encoder.
-    Ensures final output = 1024x1024 (no 2048 blow-up)
-    Adds 6→3 conv for pretrained weights compatibility.
+    Ensures final output = img_size x img_size (no 2048 blow-up).
+    Adds 6->3 conv for pretrained weights compatibility.
+
+    pretrained: load ImageNet weights (skip_mismatch on the first conv).
+                Set False for fast/offline smoke tests.
+    pretrained_trainable: whether the ResNet50 encoder is fine-tuned.
+                Frozen by default to keep memory/compute down on small GPUs.
     """
 
-    inputs = Input(shape=(IMG_SIZE, IMG_SIZE, NUM_CHANNELS), name="stacked_input")
+    inputs = Input(shape=(img_size, img_size, num_channels), name="stacked_input")
 
-    # Adapt 6 -> 3 channels
+    # Adapt N -> 3 channels
     x_in = Conv2D(3, 1, padding="same", name="six_to_three")(inputs)
 
     # Backbone
     base = ResNet50(include_top=False, weights=None, input_tensor=x_in)
 
-    # Load pretrained weights but skip mismatched first conv
-    base.load_weights(
-        tf.keras.utils.get_file(
-            'resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5',
-            'https://storage.googleapis.com/tensorflow/keras-applications/resnet/resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5'
-        ),
-        by_name=True,
-        skip_mismatch=True
-    )
+    if pretrained:
+        base.load_weights(
+            tf.keras.utils.get_file(
+                'resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5',
+                'https://storage.googleapis.com/tensorflow/keras-applications/resnet/resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5'
+            ),
+            by_name=True,
+            skip_mismatch=True
+        )
+
+    base.trainable = pretrained_trainable
 
     # Skip connections
-    skip1 = base.get_layer("conv4_block6_out").output   # 64x64
-    skip2 = base.get_layer("conv3_block4_out").output   # 128x128
-    skip3 = base.get_layer("conv2_block3_out").output   # 256x256
-    skip4 = base.get_layer("conv1_relu").output         # 512x512
-    bottleneck = base.get_layer("conv5_block3_out").output  # 32x32
+    skip1 = base.get_layer("conv4_block6_out").output
+    skip2 = base.get_layer("conv3_block4_out").output
+    skip3 = base.get_layer("conv2_block3_out").output
+    skip4 = base.get_layer("conv1_relu").output
+    bottleneck = base.get_layer("conv5_block3_out").output
 
     # Decoder
-    d1 = decoder_block(bottleneck, skip1, 512, name="dec1")   # 32 -> 64
-    d2 = decoder_block(d1,        skip2, 256, name="dec2")    # 64 -> 128
-    d3 = decoder_block(d2,        skip3, 128, name="dec3")    # 128 -> 256
-    d4 = decoder_block(d3,        skip4, 64,  name="dec4")    # 256 -> 512
+    d1 = decoder_block(bottleneck, skip1, 512, name="dec1")
+    d2 = decoder_block(d1,        skip2, 256, name="dec2")
+    d3 = decoder_block(d2,        skip3, 128, name="dec3")
+    d4 = decoder_block(d3,        skip4, 64,  name="dec4")
 
-    # Final upsample to 1024
-    x = UpSampling2D(size=(2, 2), name="up_final")(d4)        # 512 -> 1024
+    # Final upsample back to img_size
+    x = UpSampling2D(size=(2, 2), name="up_final")(d4)
     x = conv_block(x, 64, name="final")
 
-    # Output layer
-    outputs = Conv2D(NUM_CLASSES, 1, activation="softmax", name="output_segmentation")(x)
+    # Output layer (float32 for numerical stability under mixed precision)
+    outputs = Conv2D(
+        num_classes, 1, activation="softmax", name="output_segmentation",
+        dtype="float32",
+    )(x)
 
     return Model(inputs=inputs, outputs=outputs, name="ResNetUNet_xBD")
