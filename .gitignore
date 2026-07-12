@@ -1,7 +1,8 @@
 # .gitignore
-# DVC & Git Metadata
-.dvc/
-.dvcignore
+# .dvc/config (the remote name/URL) and .dvcignore are meant to be
+# committed and shared; DVC's own auto-generated .dvc/.gitignore already
+# excludes config.local, cache/, and tmp/ (the machine-specific/
+# credential/generated parts).
 .git/
 
 # Python Environment
