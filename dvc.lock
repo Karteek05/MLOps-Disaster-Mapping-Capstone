@@ -5,41 +5,78 @@ stages:
     deps:
     - path: data/raw
       hash: md5
-      md5: b98209be495690c3d89c2c8180257bda.dir
-      size: 8614649045
-      nfiles: 16794
+      md5: 7061708904fa3bcd021ef73b4f9ffe5f.dir
+      size: 8578802790
+      nfiles: 11196
     - path: src/data_prep.py
       hash: md5
-      md5: 82e4eeeabe38fce7fa0cf4142bf258f6
-      size: 5570
+      md5: b44cf20689c495f6ecb040e7d76af5e4
+      size: 5421
     outs:
     - path: data/processed
       hash: md5
-      md5: 18f49192e03bb14cece56a4e111666fc.dir
-      size: 17620546117
-      nfiles: 5597
+      md5: 3bf0a6646dd9be382491a649c7c89b96.dir
+      size: 17628035135
+      nfiles: 5598
   train:
     cmd: python -m src.train
     deps:
     - path: data/processed
       hash: md5
-      md5: 18f49192e03bb14cece56a4e111666fc.dir
-      size: 17620546117
-      nfiles: 5597
+      md5: 3bf0a6646dd9be382491a649c7c89b96.dir
+      size: 17628035135
+      nfiles: 5598
+    - path: src/data_loader.py
+      hash: md5
+      md5: 779cffbf407416164d9abba15a5c46f6
+      size: 3388
+    - path: src/metrics.py
+      hash: md5
+      md5: c0a38ffa7a4a1639f8a022906b36d456
+      size: 1269
     - path: src/model.py
       hash: md5
-      md5: add742f9853f810ebd180e8460e912a0
-      size: 3023
+      md5: 7607c2728208efe2ebfee1a779668fd9
+      size: 3386
     - path: src/train.py
       hash: md5
-      md5: cdfc1536f0abce085d9eeea6027edd9a
-      size: 4400
+      md5: 74cc2b09c879591193cacc976e6a63d2
+      size: 4133
     outs:
     - path: metrics.json
       hash: md5
-      md5: dbb58b41dcc821324fce4fc26a18671d
-      size: 12
+      md5: 293f45b45ec85372dcf9b5d9c565def6
+      size: 57
     - path: models/unet_model.h5
       hash: md5
-      md5: 1194d4040b877a775ec50734e4260431
-      size: 493123112
+      md5: 40f735a986fa946257f24a33f3b59a7c
+      size: 304667192
+  evaluate:
+    cmd: python -m src.evaluate
+    deps:
+    - path: data/processed
+      hash: md5
+      md5: 3bf0a6646dd9be382491a649c7c89b96.dir
+      size: 17628035135
+      nfiles: 5598
+    - path: models/unet_model.h5
+      hash: md5
+      md5: 40f735a986fa946257f24a33f3b59a7c
+      size: 304667192
+    - path: src/data_loader.py
+      hash: md5
+      md5: 779cffbf407416164d9abba15a5c46f6
+      size: 3388
+    - path: src/evaluate.py
+      hash: md5
+      md5: 1e7e42f1d346be3bce55f5fe82ad1401
+      size: 1823
+    - path: src/metrics.py
+      hash: md5
+      md5: c0a38ffa7a4a1639f8a022906b36d456
+      size: 1269
+    outs:
+    - path: eval_metrics.json
+      hash: md5
+      md5: 93596b72ebfa8949263a0448bd3220f6
+      size: 104
