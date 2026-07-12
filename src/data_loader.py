@@ -5,22 +5,6 @@ import numpy as np
 import tensorflow as tf
 
 
-def _collapse_mask_channels(mask, num_classes):
-    c = tf.shape(mask)[-1]
-
-    def squeeze_chan():
-        return tf.cast(tf.squeeze(mask, axis=-1), tf.int32)
-
-    def argmax_chan():
-        return tf.cast(tf.argmax(mask, axis=-1, output_type=tf.int32), tf.int32)
-
-    return tf.case(
-        [(tf.equal(c, 1), squeeze_chan), (tf.equal(c, num_classes), argmax_chan)],
-        default=argmax_chan,
-        exclusive=True,
-    )
-
-
 def make_load_and_parse(img_size, num_channels, num_classes):
     """Returns a load_and_parse(image_path, mask_path) fn bound to these dims."""
 
@@ -32,17 +16,10 @@ def make_load_and_parse(img_size, num_channels, num_classes):
         image.set_shape([None, None, num_channels])
         image = tf.image.resize(image, [img_size, img_size])
 
+        # Masks are always single-channel grayscale PNGs with class IDs
+        # (0..num_classes-1) as pixel values (see data_prep.py).
         mask_bytes = tf.io.read_file(mask_path_tensor)
-        mask = tf.io.decode_image(mask_bytes, channels=0, dtype=tf.uint8)
-        if mask.shape.rank is None:
-            mask.set_shape([None, None, None])
-
-        mask = tf.cond(
-            tf.equal(tf.rank(mask), 3),
-            lambda: _collapse_mask_channels(mask, num_classes),
-            lambda: tf.cast(mask, tf.int32),
-        )
-        mask = tf.expand_dims(mask, axis=-1)
+        mask = tf.io.decode_png(mask_bytes, channels=1, dtype=tf.uint8)
         mask = tf.image.resize(tf.cast(mask, tf.float32), [img_size, img_size], method="nearest")
         mask = tf.cast(tf.squeeze(mask, axis=-1), tf.int32)
         mask.set_shape([img_size, img_size])

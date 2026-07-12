@@ -14,7 +14,7 @@ mlflow>=2.15,<3
 tensorflow>=2.15,<2.19
 
 # App
-gradio>=4.44,<5
+gradio>=5,<6
 
 # Testing
 pytest>=8,<9

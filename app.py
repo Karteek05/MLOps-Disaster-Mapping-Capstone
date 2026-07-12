@@ -4,6 +4,7 @@ import sys
 import gradio as gr
 import numpy as np
 import tensorflow as tf
+import yaml
 from PIL import Image
 
 sys.path.append(os.getcwd())
@@ -12,8 +13,13 @@ from src.metrics import SparseMeanIoU
 
 # --- CONFIGURATION ---
 MODEL_PATH = "models/unet_model.h5"
-IMG_SIZE = 1024
 NUM_CLASSES = 5
+
+# Must match whatever resolution the loaded model was actually trained at
+# (see params.yaml's train.img_size) - the model's input layer has a fixed
+# shape, so this can't just default to the native 1024 image resolution.
+with open("params.yaml", "r") as f:
+    IMG_SIZE = yaml.safe_load(f)["train"].get("img_size", 1024)
 
 COLOR_MAP = {
     0: [0, 0, 0],        # Background
@@ -52,8 +58,11 @@ def predict_damage(pre_disaster_image, post_disaster_image):
     pre_resized = tf.image.resize(pre_disaster_image, [IMG_SIZE, IMG_SIZE])
     post_resized = tf.image.resize(post_disaster_image, [IMG_SIZE, IMG_SIZE])
 
-    pre_norm = tf.cast(pre_resized, tf.float32) / 255.0
-    post_norm = tf.cast(post_resized, tf.float32) / 255.0
+    # No normalization here - the model was trained on raw [0, 255] pixel
+    # values (see src/data_loader.py, which never divides by 255), so
+    # inference must match that or the model's activations are thrown off.
+    pre_norm = tf.cast(pre_resized, tf.float32)
+    post_norm = tf.cast(post_resized, tf.float32)
 
     stacked_image = np.dstack((pre_norm, post_norm))
     input_tensor = np.expand_dims(stacked_image, axis=0)  # add batch dimension
@@ -61,6 +70,10 @@ def predict_damage(pre_disaster_image, post_disaster_image):
     print("Running model prediction...")
     prediction_mask = model.predict(input_tensor)
     prediction_labels = np.argmax(prediction_mask[0], axis=-1)
+
+    class_names = {0: "background", 1: "no_damage", 2: "minor", 3: "major", 4: "destroyed"}
+    counts = {class_names[c]: int((prediction_labels == c).sum()) for c in class_names}
+    print(f"Predicted class pixel counts (of {prediction_labels.size} total): {counts}")
 
     output_image = np.zeros((IMG_SIZE, IMG_SIZE, 3), dtype=np.uint8)
     for class_id, color in COLOR_MAP.items():
