@@ -53,6 +53,30 @@ python app.py
 Requires a trained model at `models/unet_model.h5` (from `dvc pull` or a
 local training run).
 
+## Web app (FastAPI + Next.js)
+
+A more polished alternative to the Gradio app: a FastAPI backend wrapping the
+same inference logic, called by a Next.js/React/Tailwind frontend with
+drag-and-drop upload and a before/after damage-map view. Two servers, run
+concurrently in separate terminals:
+
+```bash
+# Terminal 1 — backend, from repo root, same Python env used elsewhere
+pip install -r backend/requirements.txt
+uvicorn backend.app.main:app --reload --port 8000
+
+# Terminal 2 — frontend
+cd frontend
+npm install
+npm run dev   # http://localhost:3000
+```
+
+Also requires `models/unet_model.h5` (same as the Gradio app above). The
+frontend defaults to `http://localhost:8000` for the backend; copy
+`frontend/.env.local.example` to `frontend/.env.local` to override
+`NEXT_PUBLIC_API_BASE_URL` (e.g. once the backend is deployed somewhere
+other than localhost).
+
 ## GPU training on Windows (e.g. GTX 1650, 4GB VRAM)
 
 TensorFlow dropped native Windows GPU support after 2.10 — `pip install

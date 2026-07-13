@@ -19,3 +19,9 @@ models/*
 .vscode/
 .idea/
 /metrics.json
+
+# Frontend (Next.js)
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+/eval_metrics.json
