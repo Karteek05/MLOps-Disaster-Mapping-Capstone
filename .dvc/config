@@ -1,4 +1,4 @@
 [core]
-    remote = origin
-['remote "origin"']
+remote = origin
+[remote "origin"]
     url = https://dagshub.com/Karteek05/MLOps-Disaster-Mapping-Capstone.dvc
