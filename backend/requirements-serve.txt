@@ -1,0 +1,11 @@
+# Runtime-only dependencies for the FastAPI inference service.
+# (backend/requirements.txt pulls in the full training stack via
+# ../requirements.txt - dvc, mlflow, gradio, pytest - which the API
+# doesn't need at runtime and which bloats the container image.)
+fastapi>=0.110,<1
+uvicorn[standard]>=0.29,<1
+python-multipart>=0.0.9,<1
+tensorflow>=2.15,<2.19
+Pillow>=10,<12
+numpy>=1.26,<2
+PyYAML>=6,<7

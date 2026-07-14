@@ -1,0 +1,13 @@
+.git
+.github
+.dvc/cache
+.dvc/tmp
+data
+frontend
+__pycache__
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.vscode
+tests
+*.md
