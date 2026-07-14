@@ -35,7 +35,6 @@ NUM_CLASSES = 5
 BATCH_SIZE = params["batch_size"]
 EPOCHS = params["epochs"]
 LEARNING_RATE = params["learning_rate"]
-LOSS_FUNCTION = params["loss_function"]
 PRETRAINED_TRAINABLE = params.get("pretrained_trainable", False)
 
 if SMOKE_TEST:
@@ -62,6 +61,25 @@ def load_smoke_test_data():
     return X, Y
 
 
+# Per-class pixel weights for the loss, derived from the full training mask
+# set (data/processed/*_mask.png: background/no_damage/minor/major/destroyed
+# = 94.18% / 4.30% / 0.53% / 0.68% / 0.32%). Without weighting, the model
+# minimizes loss by predicting background almost everywhere and never
+# learns the rare damage classes. Weights are sqrt-dampened inverse
+# frequency (softer than raw inverse frequency, which produced ~300x swings
+# and risked destabilizing training), normalized to mean 1 so overall loss
+# magnitude - and the learning rate that was tuned for it - stays comparable
+# to the unweighted loss.
+CLASS_WEIGHTS = tf.constant([0.104, 0.488, 1.383, 1.231, 1.794], dtype=tf.float32)
+
+
+def weighted_sparse_categorical_crossentropy(y_true, y_pred):
+    y_true = tf.cast(y_true, tf.int32)
+    per_pixel_loss = tf.keras.losses.sparse_categorical_crossentropy(y_true, y_pred)
+    pixel_weights = tf.gather(CLASS_WEIGHTS, y_true)
+    return tf.reduce_mean(per_pixel_loss * pixel_weights)
+
+
 def train_model():
     os.makedirs(MODELS_DIR, exist_ok=True)
 
@@ -79,7 +97,7 @@ def train_model():
         )
         model.compile(
             optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE),
-            loss=LOSS_FUNCTION,
+            loss=weighted_sparse_categorical_crossentropy,
             metrics=["accuracy", SparseMeanIoU(NUM_CLASSES)],
         )
 
@@ -88,14 +106,21 @@ def train_model():
             history = model.fit(X_train, Y_train, epochs=EPOCHS, batch_size=BATCH_SIZE, verbose=1)
             final_loss = float(history.history["loss"][-1])
             final_iou = float(history.history["IoU"][-1])
+            # DVC tracks this artifact; MLflow only logs params/metrics (not
+            # the full model binary, to avoid duplicating hundreds of MB into
+            # mlruns/ on every run).
+            model.save(MODEL_OUTPUT_PATH)
         else:
             train_dataset, val_dataset = load_real_data(
                 DATA_DIR, IMG_SIZE, NUM_CHANNELS, NUM_CLASSES, BATCH_SIZE
             )
-            # Saves after every epoch so a crash (OOM, WSL restart, etc.) doesn't
-            # lose all progress - training can be a long, interruption-prone run.
+            # Keeps only the best-val_IoU epoch's weights on disk. Without
+            # save_best_only, a fixed epoch count can end on an overfit
+            # epoch (val_IoU peaked mid-run, then degraded by the last
+            # epoch) and silently ship the worse checkpoint.
             checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
-                MODEL_OUTPUT_PATH, save_freq="epoch", verbose=1,
+                MODEL_OUTPUT_PATH, monitor="val_IoU", mode="max",
+                save_best_only=True, verbose=1,
             )
             history = model.fit(
                 train_dataset,
@@ -104,16 +129,16 @@ def train_model():
                 verbose=1,
                 callbacks=[checkpoint_callback],
             )
-            final_loss = float(history.history["loss"][-1])
-            final_iou = float(history.history["val_IoU"][-1])
+            best_epoch = int(np.argmax(history.history["val_IoU"]))
+            final_loss = float(history.history["val_loss"][best_epoch])
+            final_iou = float(history.history["val_IoU"][best_epoch])
+            # No explicit model.save() here - the checkpoint callback above
+            # already wrote the best epoch's weights to MODEL_OUTPUT_PATH.
+            # Saving again here would overwrite it with the *last* epoch's
+            # weights, which may be worse.
 
         mlflow.log_metric("final_loss", final_loss)
         mlflow.log_metric("iou_validation", final_iou)
-
-        # Save the model - DVC tracks this artifact; MLflow only logs
-        # params/metrics here (not the full model binary, to avoid
-        # duplicating hundreds of MB into mlruns/ on every run).
-        model.save(MODEL_OUTPUT_PATH)
 
         with open(METRICS_FILE, "w") as f:
             json.dump({"iou": final_iou, "loss": final_loss}, f)
