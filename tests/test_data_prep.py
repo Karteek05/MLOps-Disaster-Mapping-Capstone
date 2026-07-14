@@ -18,7 +18,7 @@ def test_create_mask_from_json_paints_damage_grade(tmp_path):
             "xy": [
                 {
                     "wkt": "POLYGON ((2 2, 8 2, 8 8, 2 8, 2 2))",
-                    "properties": {"damage_grade": "major-damage"},
+                    "properties": {"subtype": "major-damage"},
                 }
             ]
         }

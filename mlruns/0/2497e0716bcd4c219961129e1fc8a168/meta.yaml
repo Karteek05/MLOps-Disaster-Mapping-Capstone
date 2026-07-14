@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/chkar/Documents/Projects/my_mlops_project/mlruns/0/2497e0716bcd4c219961129e1fc8a168/artifacts
+end_time: 1784047562206
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 2497e0716bcd4c219961129e1fc8a168
+run_name: Run_LR0.001_size256
+run_uuid: 2497e0716bcd4c219961129e1fc8a168
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1784046901985
+status: 4
+tags: []
+user_id: Karteek

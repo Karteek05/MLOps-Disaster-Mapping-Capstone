@@ -92,7 +92,18 @@ def train_model():
             train_dataset, val_dataset = load_real_data(
                 DATA_DIR, IMG_SIZE, NUM_CHANNELS, NUM_CLASSES, BATCH_SIZE
             )
-            history = model.fit(train_dataset, epochs=EPOCHS, validation_data=val_dataset, verbose=1)
+            # Saves after every epoch so a crash (OOM, WSL restart, etc.) doesn't
+            # lose all progress - training can be a long, interruption-prone run.
+            checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+                MODEL_OUTPUT_PATH, save_freq="epoch", verbose=1,
+            )
+            history = model.fit(
+                train_dataset,
+                epochs=EPOCHS,
+                validation_data=val_dataset,
+                verbose=1,
+                callbacks=[checkpoint_callback],
+            )
             final_loss = float(history.history["loss"][-1])
             final_iou = float(history.history["val_IoU"][-1])
 
