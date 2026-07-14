@@ -23,60 +23,71 @@ stages:
     deps:
     - path: data/processed
       hash: md5
-      md5: 3bf0a6646dd9be382491a649c7c89b96.dir
-      size: 17628035135
+      md5: 371c7bba18df54ae6544b463cd34de5e.dir
+      size: 17626799200
       nfiles: 5598
     - path: src/data_loader.py
       hash: md5
       md5: 779cffbf407416164d9abba15a5c46f6
       size: 3388
+      isexec: true
     - path: src/metrics.py
       hash: md5
       md5: 920443c1acf1279c0634aebf39e06c25
       size: 1303
+      isexec: true
     - path: src/model.py
       hash: md5
       md5: 558a0e87e10411529b327eb67fcec274
       size: 3479
+      isexec: true
     - path: src/train.py
       hash: md5
-      md5: 73b9859fa6433dffc5e2d27b6313516d
-      size: 4250
+      md5: a8fa9f6c953fa5a45b5b4c99f4945dfc
+      size: 6231
+      isexec: true
     outs:
     - path: metrics.json
       hash: md5
-      md5: 980e275dd6d18534ab0977c2922e48d1
+      md5: a58d87b96051c4c09e7b4a2ca45552f0
       size: 56
+      isexec: true
     - path: models/unet_model.h5
       hash: md5
-      md5: ec4d4be5b9553ea48a7ad3ff800569ea
+      md5: 407330890974331f46d04429f4d5cc66
       size: 304667192
+      isexec: true
   evaluate:
     cmd: python -m src.evaluate
     deps:
     - path: data/processed
       hash: md5
-      md5: 3bf0a6646dd9be382491a649c7c89b96.dir
-      size: 17628035135
+      md5: 371c7bba18df54ae6544b463cd34de5e.dir
+      size: 17626799200
       nfiles: 5598
     - path: models/unet_model.h5
       hash: md5
-      md5: ec4d4be5b9553ea48a7ad3ff800569ea
+      md5: c50a2e10d7e75004087da9cce363c460
       size: 304667192
+      isexec: true
     - path: src/data_loader.py
       hash: md5
       md5: 779cffbf407416164d9abba15a5c46f6
       size: 3388
+      isexec: true
     - path: src/evaluate.py
       hash: md5
       md5: 7728021d792d9991c30b397883877aaa
       size: 1889
+      isexec: true
     - path: src/metrics.py
       hash: md5
       md5: 920443c1acf1279c0634aebf39e06c25
       size: 1303
+      isexec: true
     outs:
     - path: eval_metrics.json
       hash: md5
-      md5: 3e14892dc0643d031a0b28a83ecdd9b0
-      size: 103
+      md5: 48b7823aab2626c3c1fdfbfeedac9576
+      size: 104
+      isexec: true
