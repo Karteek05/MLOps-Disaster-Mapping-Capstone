@@ -34,7 +34,7 @@ def create_mask_from_json(image_path, json_path, output_mask_path):
             # Convert WKT coordinates to a list of tuples
             polygon_coords = [tuple(map(float, p.strip().split(' '))) for p in polygon_wkt]
             
-            damage_grade = feature['properties'].get('damage_grade', 'no-damage')
+            damage_grade = feature['properties'].get('subtype', 'no-damage')
             damage_value = DAMAGE_GRADES.get(damage_grade, 0)
             
             # Draw the polygon on the mask with the corresponding damage value

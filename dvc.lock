@@ -10,13 +10,13 @@ stages:
       nfiles: 11196
     - path: src/data_prep.py
       hash: md5
-      md5: 82e4eeeabe38fce7fa0cf4142bf258f6
-      size: 5570
+      md5: 59175c300cdb4d5b2cee3e60f48b6c09
+      size: 5565
     outs:
     - path: data/processed
       hash: md5
-      md5: 3bf0a6646dd9be382491a649c7c89b96.dir
-      size: 17628035135
+      md5: 371c7bba18df54ae6544b463cd34de5e.dir
+      size: 17626799200
       nfiles: 5598
   train:
     cmd: python -m src.train
